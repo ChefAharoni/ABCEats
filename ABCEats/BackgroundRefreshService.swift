@@ -14,58 +14,63 @@ class BackgroundRefreshService: ObservableObject {
     private let dataService = RestaurantDataService()
     
     func registerBackgroundTasks() {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundTaskIdentifier, using: nil) { task in
-            self.handleBackgroundRefresh(task: task as! BGAppRefreshTask)
+        do {
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundTaskIdentifier, using: nil) { task in
+                self.handleBackgroundRefresh(task: task as! BGAppRefreshTask)
+            }
+            print("✅ Background task registered successfully")
+        } catch {
+            print("⚠️ Background task registration failed: \(error)")
+            // Don't let this block the app - background tasks are optional
         }
     }
     
     func scheduleBackgroundRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: backgroundTaskIdentifier)
-        request.earliestBeginDate = nextRefreshDate()
+        
+        // Schedule for 4am daily
+        var dateComponents = DateComponents()
+        dateComponents.hour = 4
+        dateComponents.minute = 0
+        
+        // If it's past 4am today, schedule for tomorrow
+        let calendar = Calendar.current
+        var targetDate = calendar.nextDate(after: Date(), matching: dateComponents, matchingPolicy: .nextTime) ?? Date()
+        
+        // If we can't get a valid date, schedule for 4am tomorrow
+        if targetDate <= Date() {
+            targetDate = calendar.date(byAdding: .day, value: 1, to: targetDate) ?? Date()
+        }
+        
+        request.earliestBeginDate = targetDate
         
         do {
             try BGTaskScheduler.shared.submit(request)
+            print("✅ Background refresh scheduled for \(targetDate)")
         } catch {
-            print("Could not schedule background refresh: \(error)")
+            print("⚠️ Could not schedule background refresh: \(error)")
         }
-    }
-    
-    private func nextRefreshDate() -> Date {
-        let calendar = Calendar.current
-        let now = Date()
-        
-        // Get tomorrow at 4:00 AM
-        var components = calendar.dateComponents([.year, .month, .day], from: now)
-        components.hour = 4
-        components.minute = 0
-        components.second = 0
-        
-        guard let tomorrow4AM = calendar.date(from: components) else {
-            return now.addingTimeInterval(24 * 60 * 60) // Fallback to 24 hours from now
-        }
-        
-        return tomorrow4AM
     }
     
     private func handleBackgroundRefresh(task: BGAppRefreshTask) {
-        // Schedule the next refresh
-        scheduleBackgroundRefresh()
+        print("🔄 Background refresh started")
         
-        // Create a task to track background execution
+        // Set up task expiration
         task.expirationHandler = {
+            print("⚠️ Background refresh expired")
             task.setTaskCompleted(success: false)
         }
         
         // Perform the refresh
-        refreshData { success in
+        dataService.fetchRestaurants(modelContext: ModelContext(try! ModelContainer(for: Restaurant.self))) { success in
+            if success {
+                print("✅ Background refresh completed successfully")
+                // Schedule the next refresh
+                self.scheduleBackgroundRefresh()
+            } else {
+                print("❌ Background refresh failed")
+            }
             task.setTaskCompleted(success: success)
         }
-    }
-    
-    private func refreshData(completion: @escaping (Bool) -> Void) {
-        // Note: In a real app, you'd need to access ModelContext differently in background
-        // For now, we'll just mark this as a placeholder
-        print("Background refresh triggered")
-        completion(true)
     }
 } 

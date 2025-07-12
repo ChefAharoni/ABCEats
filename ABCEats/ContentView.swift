@@ -12,7 +12,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var restaurants: [Restaurant]
     
-    @StateObject private var dataService = MockDataService()
+    @StateObject private var dataService = RestaurantDataService()
     @StateObject private var searchViewModel = SearchViewModel()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var backgroundRefreshService = BackgroundRefreshService()
@@ -22,6 +22,8 @@ struct ContentView: View {
     @State private var showingRefreshAlert = false
     
     var body: some View {
+        let _ = print("🎯 ContentView body is being rendered!")
+        
         TabView(selection: $selectedTab) {
             // Search Tab
             NavigationView {
@@ -35,7 +37,7 @@ struct ContentView: View {
             
             // Map Tab
             NavigationView {
-                mapView
+                RestaurantMapView(locationManager: locationManager, dataService: dataService)
             }
             .tabItem {
                 Image(systemName: "map")
@@ -54,6 +56,7 @@ struct ContentView: View {
             .tag(2)
         }
         .onAppear {
+            print("🎯 ContentView appeared!")
             setupApp()
         }
         .onChange(of: restaurants) { _ in
@@ -66,6 +69,15 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Would you like to refresh the restaurant data from NYC Health?")
+        }
+        .alert("Error", isPresented: .constant(dataService.errorMessage != nil)) {
+            Button("OK") {
+                dataService.errorMessage = nil
+            }
+        } message: {
+            if let errorMessage = dataService.errorMessage {
+                Text(errorMessage)
+            }
         }
     }
     
@@ -119,12 +131,29 @@ struct ContentView: View {
     }
     
     private var loadingView: some View {
-        VStack {
+        VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
-            Text("Loading restaurants...")
+            
+            Text(dataService.progressMessage)
                 .foregroundColor(.secondary)
-                .padding(.top)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            
+            if dataService.totalRestaurantsLoaded > 0 {
+                Text("Total restaurants loaded: \(dataService.totalRestaurantsLoaded)")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                    .fontWeight(.medium)
+            }
+            
+            if !dataService.progressMessage.isEmpty {
+                Text("This may take a few minutes for the first load...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -161,12 +190,6 @@ struct ContentView: View {
         .listStyle(PlainListStyle())
     }
     
-    private var mapView: some View {
-        RestaurantMapView(restaurants: searchViewModel.filteredRestaurants, locationManager: locationManager)
-            .navigationTitle("Restaurant Map")
-            .navigationBarTitleDisplayMode(.large)
-    }
-    
     private var settingsView: some View {
         List {
             Section("Data") {
@@ -186,6 +209,20 @@ struct ContentView: View {
                     showingRefreshAlert = true
                 }
                 .foregroundColor(.blue)
+                
+                Button("Test API Connection") {
+                    dataService.testAPI()
+                }
+                .foregroundColor(.green)
+                
+                if dataService.isLoading {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading...")
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             
             Section("Location") {
@@ -214,7 +251,7 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                Link("NYC Health Data Source", destination: URL(string: "https://a816-health.nyc.gov/ABCEatsRestaurants/#!/Search")!)
+                Link("NYC Health Data Source", destination: URL(string: "https://data.cityofnewyork.us/Health/DOHMH-New-York-City-Restaurant-Inspection-Results/43nn-pn8j")!)
             }
         }
         .navigationTitle("Settings")
@@ -235,18 +272,47 @@ struct ContentView: View {
     }
     
     private func setupApp() {
+        print("🚀 Setting up app...")
+        
         // Register background tasks
-        backgroundRefreshService.registerBackgroundTasks()
         backgroundRefreshService.scheduleBackgroundRefresh()
         
+        // Test API connection
+        print("🧪 Testing API connection...")
+        dataService.testAPI()
+        
         // Load initial data if needed
+        print("📊 Checking restaurants count: \(restaurants.count)")
         if restaurants.isEmpty {
+            print("📱 No restaurants found, starting data fetch...")
             refreshData()
+        } else {
+            print("📱 Found \(restaurants.count) existing restaurants")
+            // Check if data is stale (older than 24 hours)
+            if let lastUpdate = dataService.lastUpdateTime {
+                let hoursSinceUpdate = Calendar.current.dateComponents([.hour], from: lastUpdate, to: Date()).hour ?? 0
+                if hoursSinceUpdate >= 24 {
+                    print("🔄 Data is stale (\(hoursSinceUpdate) hours old), refreshing...")
+                    refreshData()
+                } else {
+                    print("✅ Data is fresh (\(hoursSinceUpdate) hours old)")
+                }
+            } else {
+                print("🔄 No last update time found, refreshing data...")
+                refreshData()
+            }
         }
     }
     
     private func refreshData() {
-        dataService.fetchRestaurants(modelContext: modelContext)
+        print("🔄 Starting data refresh...")
+        dataService.fetchRestaurants(modelContext: modelContext) { success in
+            if success {
+                print("✅ Data refresh completed successfully")
+            } else {
+                print("❌ Data refresh failed")
+            }
+        }
     }
     
     private func formatDate(_ date: Date) -> String {
