@@ -1,0 +1,5 @@
+# Appfile for Fastlane
+
+app_identifier "com.amitaharoni.abceat " # Replace with your app's bundle identifier
+apple_id "amitaha29@gmail.com"
+# team_id "YOUR_TEAM_ID"            # Uncomment and set your Apple Developer Team ID if needed 

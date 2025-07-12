@@ -1,0 +1,15 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and sign the app for CI/CD using match"
+  lane :ci_build do
+    # Fetch and install certificates and provisioning profiles
+    match(type: "development", readonly: true)
+
+    # Build and sign the app
+    build_app(
+      scheme: "ABCEats",
+      export_method: "development"
+    )
+  end
+end 

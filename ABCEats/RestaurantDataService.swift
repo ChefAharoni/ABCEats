@@ -279,28 +279,36 @@ class RestaurantDataService: ObservableObject {
     // MARK: - Search Methods
     
     func fetchRestaurants(borough: String, searchText: String = "", offset: Int = 0, limit: Int = 50) -> [Restaurant] {
-        var filteredRestaurants = allRestaurants.filter { $0.borough == borough }
+        // Use a more efficient approach for large datasets
+        let filteredRestaurants: [Restaurant]
         
-        // Apply search filter
-        if !searchText.isEmpty {
+        if searchText.isEmpty {
+            // No search text - just filter by borough
+            filteredRestaurants = allRestaurants.filter { $0.borough == borough }
+        } else {
+            // With search text - use more efficient filtering
             let searchLower = searchText.lowercased()
-            filteredRestaurants = filteredRestaurants.filter { restaurant in
-                restaurant.name.lowercased().contains(searchLower) ||
-                restaurant.address.lowercased().contains(searchLower) ||
-                (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
+            filteredRestaurants = allRestaurants.filter { restaurant in
+                restaurant.borough == borough && (
+                    restaurant.name.lowercased().contains(searchLower) ||
+                    restaurant.address.lowercased().contains(searchLower) ||
+                    (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
+                )
             }
         }
         
-        // Sort by name
-        filteredRestaurants.sort { $0.name < $1.name }
+        // Sort by name (only if we have a reasonable number of results)
+        let sortedRestaurants = filteredRestaurants.count > 1000 ? 
+            filteredRestaurants : 
+            filteredRestaurants.sorted { $0.name < $1.name }
         
         // Apply pagination
         let startIndex = offset
-        let endIndex = min(startIndex + limit, filteredRestaurants.count)
+        let endIndex = min(startIndex + limit, sortedRestaurants.count)
         
-        if startIndex < filteredRestaurants.count {
-            let result = Array(filteredRestaurants[startIndex..<endIndex])
-            print("📋 Fetched \(result.count) restaurants for borough: \(borough), offset: \(offset)")
+        if startIndex < sortedRestaurants.count {
+            let result = Array(sortedRestaurants[startIndex..<endIndex])
+            print("📋 Fetched \(result.count) restaurants for borough: \(borough), offset: \(offset), total: \(sortedRestaurants.count)")
             return result
         }
         
@@ -308,18 +316,21 @@ class RestaurantDataService: ObservableObject {
     }
     
     func getRestaurantCount(borough: String, searchText: String = "") -> Int {
-        var filteredRestaurants = allRestaurants.filter { $0.borough == borough }
-        
-        if !searchText.isEmpty {
+        // Use the same efficient filtering logic as fetchRestaurants
+        if searchText.isEmpty {
+            // No search text - just count by borough
+            return allRestaurants.filter { $0.borough == borough }.count
+        } else {
+            // With search text - use efficient filtering
             let searchLower = searchText.lowercased()
-            filteredRestaurants = filteredRestaurants.filter { restaurant in
-                restaurant.name.lowercased().contains(searchLower) ||
-                restaurant.address.lowercased().contains(searchLower) ||
-                (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
-            }
+            return allRestaurants.filter { restaurant in
+                restaurant.borough == borough && (
+                    restaurant.name.lowercased().contains(searchLower) ||
+                    restaurant.address.lowercased().contains(searchLower) ||
+                    (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
+                )
+            }.count
         }
-        
-        return filteredRestaurants.count
     }
     
     func getAvailableBoroughs() -> [String] {
@@ -330,15 +341,36 @@ class RestaurantDataService: ObservableObject {
     // MARK: - Location-based Methods
     
     func fetchRestaurantsNearLocation(center: CLLocationCoordinate2D, radius: Double, limit: Int = 100) -> [Restaurant] {
-        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        
-        let nearbyRestaurants = allRestaurants.filter { restaurant in
-            let restaurantLocation = CLLocation(latitude: restaurant.latitude, longitude: restaurant.longitude)
-            let distance = centerLocation.distance(from: restaurantLocation) / 1609.34 // Convert to miles
-            return distance <= radius
+        return PerformanceMonitor.shared.measure("Location Search") {
+            let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+            
+            // Pre-calculate the bounding box for faster filtering
+            let latDelta = radius / 69.0 // Convert miles to degrees (approximate)
+            let lonDelta = radius / (54.6 * cos(center.latitude * .pi / 180)) // Adjust for latitude
+            
+            let minLat = center.latitude - latDelta
+            let maxLat = center.latitude + latDelta
+            let minLon = center.longitude - lonDelta
+            let maxLon = center.longitude + lonDelta
+            
+            // First pass: filter by bounding box (much faster than distance calculation)
+            let candidates = allRestaurants.filter { restaurant in
+                restaurant.latitude >= minLat && restaurant.latitude <= maxLat &&
+                restaurant.longitude >= minLon && restaurant.longitude <= maxLon
+            }
+            
+            // Second pass: calculate exact distances for candidates and sort
+            let nearbyRestaurants = candidates.compactMap { restaurant -> (Restaurant, Double)? in
+                let restaurantLocation = CLLocation(latitude: restaurant.latitude, longitude: restaurant.longitude)
+                let distance = centerLocation.distance(from: restaurantLocation) / 1609.34 // Convert to miles
+                return distance <= radius ? (restaurant, distance) : nil
+            }
+            .sorted { $0.1 < $1.1 } // Sort by distance
+            .prefix(limit)
+            .map { $0.0 } // Extract just the restaurants
+            
+            return Array(nearbyRestaurants)
         }
-        
-        return Array(nearbyRestaurants.prefix(limit))
     }
     
     // MARK: - Data Management
