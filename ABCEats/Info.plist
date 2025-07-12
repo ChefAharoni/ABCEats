@@ -26,5 +26,9 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ABCEats needs your location to show nearby restaurants and help you find places to eat in your area.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>ABCEats needs your location to show nearby restaurants and help you find places to eat in your area.</string>
 </dict>
 </plist>

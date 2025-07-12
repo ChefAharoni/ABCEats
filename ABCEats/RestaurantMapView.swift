@@ -23,6 +23,7 @@ struct RestaurantMapView: View {
     @State private var currentRestaurants: [Restaurant] = []
     @State private var lastRegionUpdate = Date()
     @State private var regionUpdateTimer: Timer?
+    @State private var showingLocationAlert = false
     
     // Performance optimization constants
     private let maxVisibleRestaurants = 50
@@ -35,8 +36,15 @@ struct RestaurantMapView: View {
             Map(coordinateRegion: $region, showsUserLocation: true, annotationItems: currentRestaurants) { restaurant in
                 MapAnnotation(coordinate: restaurant.coordinate) {
                     RestaurantAnnotationView(restaurant: restaurant) {
-                        selectedRestaurant = restaurant
-                        showingDetail = true
+                        print("📍 Restaurant selected: \(restaurant.name)")
+                        // Ensure we're on the main thread and set the restaurant first
+                        DispatchQueue.main.async {
+                            selectedRestaurant = restaurant
+                            // Small delay to ensure the restaurant is set before showing sheet
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                showingDetail = true
+                            }
+                        }
                     }
                 }
             }
@@ -60,14 +68,24 @@ struct RestaurantMapView: View {
                 HStack {
                     Spacer()
                     Button(action: centerOnUserLocation) {
-                        Image(systemName: "location.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
+                        ZStack {
+                            Circle()
+                                .fill(locationButtonColor)
+                                .frame(width: 50, height: 50)
+                                .shadow(radius: 4)
+                            
+                            if locationManager.isRequestingLocation {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: locationButtonIcon)
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                            }
+                        }
                     }
+                    .disabled(locationManager.isRequestingLocation)
                     .padding()
                 }
             }
@@ -139,10 +157,29 @@ struct RestaurantMapView: View {
                 NavigationView {
                     RestaurantDetailView(restaurant: restaurant)
                         .navigationBarItems(trailing: Button("Done") {
+                            print("🏪 Closing restaurant detail view")
                             showingDetail = false
+                            selectedRestaurant = nil
                         })
                 }
             }
+        }
+        .onChange(of: selectedRestaurant) { restaurant in
+            if let restaurant = restaurant {
+                print("🏪 selectedRestaurant changed to: \(restaurant.name)")
+            } else {
+                print("🏪 selectedRestaurant cleared")
+            }
+        }
+        .alert("Location Access", isPresented: $showingLocationAlert) {
+            Button("Settings") {
+                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsUrl)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("ABCEats needs location access to show restaurants near you. Please enable location services in Settings.")
         }
         .onAppear {
             locationManager.requestLocationPermission()
@@ -150,12 +187,40 @@ struct RestaurantMapView: View {
         }
         .onChange(of: locationManager.location) { location in
             if let location = location {
-                region.center = location.coordinate
+                // Only update region if we're not currently loading location
+                if !locationManager.isRequestingLocation {
+                    region.center = location.coordinate
+                }
+            }
+        }
+        .onChange(of: locationManager.errorMessage) { errorMessage in
+            if errorMessage != nil {
+                showingLocationAlert = true
             }
         }
         .onDisappear {
             regionUpdateTimer?.invalidate()
             regionUpdateTimer = nil
+        }
+    }
+    
+    private var locationButtonColor: Color {
+        if locationManager.isRequestingLocation {
+            return .orange
+        } else if locationManager.canAccessLocation() {
+            return .blue
+        } else {
+            return .gray
+        }
+    }
+    
+    private var locationButtonIcon: String {
+        if locationManager.isRequestingLocation {
+            return "location"
+        } else if locationManager.canAccessLocation() {
+            return "location.fill"
+        } else {
+            return "location.slash"
         }
     }
     
@@ -241,29 +306,41 @@ struct RestaurantMapView: View {
     }
     
     private func centerOnUserLocation() {
+        // Check if we have location access
+        if !locationManager.canAccessLocation() {
+            locationManager.requestLocationPermission()
+            return
+        }
+        
+        // If we already have a location, use it immediately
         if let location = locationManager.location {
-            withAnimation {
-                region.center = location.coordinate
-                // Set span to show approximately 0.5 mile radius (zoomed in enough to show restaurants)
-                let span = MKCoordinateSpan(latitudeDelta: 0.014, longitudeDelta: 0.014) // ~0.5 mile
-                region.span = span
-            }
-            
-            // Load restaurants in 0.5-mile radius around user location
-            DispatchQueue.global(qos: .userInitiated).async {
-                let restaurants = dataService.fetchRestaurantsNearLocation(
-                    center: location.coordinate,
-                    radius: 0.5,
-                    limit: maxVisibleRestaurants
-                )
-                
-                DispatchQueue.main.async {
-                    self.currentRestaurants = restaurants
-                    print("📍 Loaded \(restaurants.count) restaurants within 0.5 miles of user location")
-                }
-            }
+            centerMapOnLocation(location)
         } else {
+            // Request current location
             locationManager.getCurrentLocation()
+        }
+    }
+    
+    private func centerMapOnLocation(_ location: CLLocation) {
+        withAnimation(.easeInOut(duration: 0.5)) {
+            region.center = location.coordinate
+            // Set span to show approximately 0.3 mile radius
+            let span = MKCoordinateSpan(latitudeDelta: 0.008, longitudeDelta: 0.008) // ~0.3 mile
+            region.span = span
+        }
+        
+        // Load restaurants in 0.3-mile radius around user location
+        DispatchQueue.global(qos: .userInitiated).async {
+            let restaurants = dataService.fetchRestaurantsNearLocation(
+                center: location.coordinate,
+                radius: 0.3,
+                limit: maxVisibleRestaurants
+            )
+            
+            DispatchQueue.main.async {
+                self.currentRestaurants = restaurants
+                print("📍 Loaded \(restaurants.count) restaurants within 0.3 miles of user location")
+            }
         }
     }
 }

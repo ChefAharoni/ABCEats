@@ -275,10 +275,7 @@ struct ContentView: View {
         }
         .listStyle(PlainListStyle())
         .onAppear {
-            // Load initial data if needed
-            if searchViewModel.filteredRestaurants.isEmpty && searchViewModel.selectedBorough != nil {
-                searchViewModel.loadMoreRestaurants()
-            }
+            // The SearchViewModel automatically loads data when borough is selected
         }
     }
     

@@ -30,11 +30,15 @@ class RestaurantDataService: ObservableObject {
     private let lastUpdateKey = "lastUpdateTime"
     
     init() {
+        print("🏪 RestaurantDataService initializing...")
         loadRestaurantsFromStorage()
         
         // If no data in storage, try to load from bundled data
         if allRestaurants.isEmpty {
+            print("📦 No data in storage, loading bundled data...")
             loadBundledData()
+        } else {
+            print("✅ Data already loaded from storage: \(allRestaurants.count) restaurants")
         }
     }
     
@@ -60,19 +64,35 @@ class RestaurantDataService: ObservableObject {
         
         do {
             let data = try Data(contentsOf: url)
+            print("📦 Found bundled data file, size: \(data.count) bytes")
+            
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             
             let restaurants = try decoder.decode([Restaurant].self, from: data)
             allRestaurants = restaurants
             
-            print("📦 Loaded \(restaurants.count) restaurants from bundled data")
+            print("📦 Successfully loaded \(restaurants.count) restaurants from bundled data")
             
             // Save to storage for future use
             saveRestaurantsToStorage()
             
         } catch {
             print("❌ Failed to load bundled data: \(error)")
+            if let decodingError = error as? DecodingError {
+                switch decodingError {
+                case .dataCorrupted(let context):
+                    print("❌ Data corrupted: \(context)")
+                case .keyNotFound(let key, let context):
+                    print("❌ Key not found: \(key) at \(context)")
+                case .typeMismatch(let type, let context):
+                    print("❌ Type mismatch: expected \(type) at \(context)")
+                case .valueNotFound(let type, let context):
+                    print("❌ Value not found: expected \(type) at \(context)")
+                @unknown default:
+                    print("❌ Unknown decoding error")
+                }
+            }
         }
     }
     
@@ -249,6 +269,7 @@ class RestaurantDataService: ObservableObject {
             zipCode: inspection.zipcode ?? "",
             latitude: Double(inspection.latitude ?? "0") ?? 0.0,
             longitude: Double(inspection.longitude ?? "0") ?? 0.0,
+            lastUpdated: parseDate(inspection.recordDate) ?? Date(),
             phone: inspection.phone,
             cuisine: inspection.cuisineDescription,
             inspectionDate: parseDate(inspection.inspectionDate),
@@ -279,12 +300,16 @@ class RestaurantDataService: ObservableObject {
     // MARK: - Search Methods
     
     func fetchRestaurants(borough: String, searchText: String = "", offset: Int = 0, limit: Int = 50) -> [Restaurant] {
+        print("🔍 Fetching restaurants for borough: '\(borough)', search: '\(searchText)', offset: \(offset), limit: \(limit)")
+        print("🔍 Total restaurants in memory: \(allRestaurants.count)")
+        
         // Use a more efficient approach for large datasets
         let filteredRestaurants: [Restaurant]
         
         if searchText.isEmpty {
             // No search text - just filter by borough
             filteredRestaurants = allRestaurants.filter { $0.borough == borough }
+            print("🔍 Filtered by borough only: \(filteredRestaurants.count) restaurants")
         } else {
             // With search text - use more efficient filtering
             let searchLower = searchText.lowercased()
@@ -295,6 +320,7 @@ class RestaurantDataService: ObservableObject {
                     (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
                 )
             }
+            print("🔍 Filtered by borough and search: \(filteredRestaurants.count) restaurants")
         }
         
         // Sort by name (only if we have a reasonable number of results)
@@ -308,10 +334,11 @@ class RestaurantDataService: ObservableObject {
         
         if startIndex < sortedRestaurants.count {
             let result = Array(sortedRestaurants[startIndex..<endIndex])
-            print("📋 Fetched \(result.count) restaurants for borough: \(borough), offset: \(offset), total: \(sortedRestaurants.count)")
+            print("📋 Returning \(result.count) restaurants for borough: \(borough), offset: \(offset), total: \(sortedRestaurants.count)")
             return result
         }
         
+        print("📋 No restaurants found for borough: \(borough)")
         return []
     }
     
@@ -335,7 +362,9 @@ class RestaurantDataService: ObservableObject {
     
     func getAvailableBoroughs() -> [String] {
         let boroughs = Set(allRestaurants.map { $0.borough })
-        return Array(boroughs).sorted()
+        let sortedBoroughs = Array(boroughs).sorted()
+        print("🏛️ Available boroughs: \(sortedBoroughs) (from \(allRestaurants.count) restaurants)")
+        return sortedBoroughs
     }
     
     // MARK: - Location-based Methods

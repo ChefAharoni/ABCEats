@@ -40,19 +40,27 @@ class SearchViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Reset when borough changes
+        // Reset when borough changes and immediately load restaurants
         $selectedBorough
-            .sink { [weak self] _ in
-                self?.resetAndLoad()
+            .sink { [weak self] borough in
+                print("🏛️ Borough changed to: \(borough ?? "nil")")
+                if let borough = borough {
+                    self?.resetAndLoadForBorough(borough)
+                } else {
+                    self?.resetAndLoad()
+                }
             }
             .store(in: &cancellables)
     }
     
     func getAvailableBoroughs() -> [String] {
-        return dataService.getAvailableBoroughs()
+        let boroughs = dataService.getAvailableBoroughs()
+        print("🏛️ Available boroughs: \(boroughs)")
+        return boroughs
     }
     
     func resetAndLoad() {
+        print("🔄 Resetting and clearing all data")
         currentOffset = 0
         filteredRestaurants = []
         hasMoreData = true
@@ -63,13 +71,56 @@ class SearchViewModel: ObservableObject {
         
         // Cancel any ongoing search
         searchTask?.cancel()
+    }
+    
+    func resetAndLoadForBorough(_ borough: String) {
+        print("🏛️ Resetting and loading for borough: \(borough)")
+        currentOffset = 0
+        filteredRestaurants = []
+        hasMoreData = true
+        allRestaurantsInBorough = []
+        searchResults = []
+        lastSearchText = ""
+        lastBorough = borough
         
+        // Cancel any ongoing search
+        searchTask?.cancel()
+        
+        // Check if data service has data
+        let availableBoroughs = dataService.getAvailableBoroughs()
+        if availableBoroughs.isEmpty {
+            print("⚠️ No boroughs available in data service")
+            return
+        }
+        
+        if !availableBoroughs.contains(borough) {
+            print("⚠️ Borough '\(borough)' not found in available boroughs: \(availableBoroughs)")
+            return
+        }
+        
+        print("✅ Borough '\(borough)' found, loading restaurants...")
+        
+        // Immediately load the first page of restaurants for this borough
         loadMoreRestaurants()
     }
     
     func loadMoreRestaurants() {
-        guard let borough = selectedBorough, hasMoreData, !isLoadingMore else { return }
+        guard let borough = selectedBorough else { 
+            print("❌ No borough selected, cannot load restaurants")
+            return 
+        }
         
+        guard hasMoreData else { 
+            print("❌ No more data available")
+            return 
+        }
+        
+        guard !isLoadingMore else { 
+            print("⏳ Already loading more restaurants")
+            return 
+        }
+        
+        print("📋 Loading restaurants for borough: \(borough), offset: \(currentOffset)")
         isLoadingMore = true
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -77,6 +128,7 @@ class SearchViewModel: ObservableObject {
             
             // If we have cached results, use them
             if !self.searchResults.isEmpty {
+                print("📋 Using cached search results")
                 let startIndex = self.currentOffset
                 let endIndex = min(startIndex + self.pageSize, self.searchResults.count)
                 
@@ -88,23 +140,28 @@ class SearchViewModel: ObservableObject {
                         self.filteredRestaurants.append(contentsOf: newRestaurants)
                         self.currentOffset += newRestaurants.count
                         self.hasMoreData = endIndex < self.searchResults.count
+                        print("✅ Loaded \(newRestaurants.count) restaurants from cache, total: \(self.filteredRestaurants.count)")
                     }
                 } else {
                     DispatchQueue.main.async {
                         self.isLoadingMore = false
                         self.hasMoreData = false
+                        print("✅ No more cached results")
                     }
                 }
                 return
             }
             
             // Otherwise, fetch from data service
+            print("🌐 Fetching from data service...")
             let restaurants = self.dataService.fetchRestaurants(
                 borough: borough,
                 searchText: self.searchText,
                 offset: self.currentOffset,
                 limit: self.pageSize
             )
+            
+            print("📋 Data service returned \(restaurants.count) restaurants")
             
             DispatchQueue.main.async {
                 self.isLoadingMore = false
@@ -116,9 +173,11 @@ class SearchViewModel: ObservableObject {
                 if self.currentOffset == 0 {
                     // First page - replace all
                     self.filteredRestaurants = restaurants
+                    print("✅ First page loaded: \(restaurants.count) restaurants")
                 } else {
                     // Subsequent pages - append
                     self.filteredRestaurants.append(contentsOf: restaurants)
+                    print("✅ Appended \(restaurants.count) restaurants, total: \(self.filteredRestaurants.count)")
                 }
                 
                 self.currentOffset += restaurants.count
@@ -129,32 +188,39 @@ class SearchViewModel: ObservableObject {
     private func performSearch() {
         guard let borough = selectedBorough else { return }
         
+        print("🔍 Performing search for borough: \(borough), text: '\(searchText)'")
+        
         // Cancel previous search task
         searchTask?.cancel()
         
         // If search text is empty, reset to show all restaurants in borough
         if searchText.isEmpty {
-            resetAndLoad()
+            print("🔍 Empty search, resetting to show all restaurants")
+            resetAndLoadForBorough(borough)
             return
         }
         
         // If borough changed, we need to reload all restaurants for that borough
         if borough != lastBorough {
+            print("🔍 Borough changed, loading all restaurants for new borough")
             loadAllRestaurantsForBorough(borough)
             return
         }
         
         // If we already have all restaurants for this borough, perform local search
         if !allRestaurantsInBorough.isEmpty {
+            print("🔍 Performing local search on \(allRestaurantsInBorough.count) restaurants")
             performLocalSearch()
             return
         }
         
         // Otherwise, load all restaurants for the borough first
+        print("🔍 Loading all restaurants for borough first")
         loadAllRestaurantsForBorough(borough)
     }
     
     private func loadAllRestaurantsForBorough(_ borough: String) {
+        print("📥 Loading all restaurants for borough: \(borough)")
         searchTask = Task {
             // Load all restaurants for the borough (without search filter)
             let allRestaurants = dataService.fetchRestaurants(
@@ -163,6 +229,8 @@ class SearchViewModel: ObservableObject {
                 offset: 0,
                 limit: 10000 // Large limit to get all restaurants
             )
+            
+            print("📥 Loaded \(allRestaurants.count) total restaurants for borough: \(borough)")
             
             await MainActor.run {
                 self.allRestaurantsInBorough = allRestaurants
@@ -175,6 +243,7 @@ class SearchViewModel: ObservableObject {
     private func performLocalSearch() {
         guard !searchText.isEmpty else {
             // Empty search - show first page of all restaurants
+            print("🔍 Empty search, showing first page of all restaurants")
             currentOffset = 0
             searchResults = allRestaurantsInBorough
             loadMoreRestaurants()
@@ -182,6 +251,7 @@ class SearchViewModel: ObservableObject {
         }
         
         let searchLower = searchText.lowercased()
+        print("🔍 Performing local search for: '\(searchText)'")
         
         // Perform local filtering
         let filtered = allRestaurantsInBorough.filter { restaurant in
@@ -190,6 +260,8 @@ class SearchViewModel: ObservableObject {
             (restaurant.cuisine?.lowercased().contains(searchLower) ?? false) ||
             restaurant.borough.lowercased().contains(searchLower)
         }
+        
+        print("🔍 Found \(filtered.count) matching restaurants")
         
         // Sort by relevance (exact matches first, then partial matches)
         let sortedResults = filtered.sorted { restaurant1, restaurant2 in
@@ -217,6 +289,7 @@ class SearchViewModel: ObservableObject {
     }
     
     func clearFilters() {
+        print("🧹 Clearing all filters")
         searchText = ""
         selectedBorough = nil
         resetAndLoad()

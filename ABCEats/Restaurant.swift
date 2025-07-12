@@ -8,7 +8,7 @@
 import Foundation
 import CoreLocation
 
-struct Restaurant: Identifiable, Codable {
+struct Restaurant: Identifiable, Codable, Equatable {
     let id: String
     let name: String
     let grade: String
@@ -55,6 +55,7 @@ struct Restaurant: Identifiable, Codable {
         zipCode: String,
         latitude: Double,
         longitude: Double,
+        lastUpdated: Date = Date(),
         phone: String? = nil,
         cuisine: String? = nil,
         inspectionDate: Date? = nil,
@@ -69,10 +70,16 @@ struct Restaurant: Identifiable, Codable {
         self.zipCode = zipCode
         self.latitude = latitude
         self.longitude = longitude
-        self.lastUpdated = Date()
+        self.lastUpdated = lastUpdated
         self.phone = phone
         self.cuisine = cuisine
         self.inspectionDate = inspectionDate
         self.score = score
+    }
+    
+    // MARK: - Equatable
+    
+    static func == (lhs: Restaurant, rhs: Restaurant) -> Bool {
+        return lhs.id == rhs.id
     }
 }

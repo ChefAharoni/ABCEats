@@ -13,6 +13,7 @@ struct RestaurantDetailView: View {
     @State private var region: MKCoordinateRegion
     
     init(restaurant: Restaurant) {
+        print("🏪 RestaurantDetailView initializing for: \(restaurant.name)")
         self.restaurant = restaurant
         self._region = State(initialValue: MKCoordinateRegion(
             center: restaurant.coordinate,
@@ -41,6 +42,9 @@ struct RestaurantDetailView: View {
         }
         .navigationTitle(restaurant.name)
         .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            print("🏪 RestaurantDetailView appeared for: \(restaurant.name)")
+        }
     }
     
     private var headerSection: some View {
