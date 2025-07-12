@@ -7,12 +7,13 @@
 
 import SwiftUI
 import SwiftData
+import BackgroundTasks
 
 @main
 struct ABCEatsApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Restaurant.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -28,5 +29,13 @@ struct ABCEatsApp: App {
             ContentView()
         }
         .modelContainer(sharedModelContainer)
+    }
+    
+    init() {
+        // Configure background tasks
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.abceats.refresh", using: nil) { task in
+            // This will be handled by BackgroundRefreshService
+            task.setTaskCompleted(success: true)
+        }
     }
 }

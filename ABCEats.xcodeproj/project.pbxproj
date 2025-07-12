@@ -29,9 +29,22 @@
 		21061D9B2E22B82500EB57D1 /* ABCEatsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ABCEatsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		21061DC42E22BC7B00EB57D1 /* Exceptions for "ABCEats" folder in "ABCEats" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 21061D812E22B82300EB57D1 /* ABCEats */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		21061D842E22B82300EB57D1 /* ABCEats */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				21061DC42E22BC7B00EB57D1 /* Exceptions for "ABCEats" folder in "ABCEats" target */,
+			);
 			path = ABCEats;
 			sourceTree = "<group>";
 		};
