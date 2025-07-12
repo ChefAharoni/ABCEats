@@ -31,6 +31,11 @@ class RestaurantDataService: ObservableObject {
     
     init() {
         loadRestaurantsFromStorage()
+        
+        // If no data in storage, try to load from bundled data
+        if allRestaurants.isEmpty {
+            loadBundledData()
+        }
     }
     
     // MARK: - Data Persistence
@@ -44,6 +49,30 @@ class RestaurantDataService: ObservableObject {
         
         if let lastUpdate = UserDefaults.standard.object(forKey: lastUpdateKey) as? Date {
             lastUpdateTime = lastUpdate
+        }
+    }
+    
+    private func loadBundledData() {
+        guard let url = Bundle.main.url(forResource: "restaurants_data", withExtension: "json") else {
+            print("⚠️ No bundled restaurant data found")
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            
+            let restaurants = try decoder.decode([Restaurant].self, from: data)
+            allRestaurants = restaurants
+            
+            print("📦 Loaded \(restaurants.count) restaurants from bundled data")
+            
+            // Save to storage for future use
+            saveRestaurantsToStorage()
+            
+        } catch {
+            print("❌ Failed to load bundled data: \(error)")
         }
     }
     
