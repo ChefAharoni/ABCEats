@@ -6,9 +6,8 @@
 //
 
 import Foundation
-import SwiftData
 import Combine
-import CoreLocation // Added for CLLocationCoordinate2D
+import CoreLocation
 
 class RestaurantDataService: ObservableObject {
     private let baseURL = "https://data.cityofnewyork.us/resource/43nn-pn8j.json"
@@ -23,157 +22,57 @@ class RestaurantDataService: ObservableObject {
     private var retryCount = 0
     private let maxRetries = 3
     
-    // Location-based loading
-    @Published var currentViewRestaurants: [Restaurant] = []
+    // In-memory storage
     private var allRestaurants: [Restaurant] = []
     
-    // Test function to verify API is working
-    func testAPI() {
-        print("🧪 Testing API connection...")
-        let testURL = "https://data.cityofnewyork.us/resource/43nn-pn8j.json?$limit=5"
-        
-        guard let url = URL(string: testURL) else {
-            print("❌ Invalid test URL")
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30.0
-        
-        URLSession.shared.dataTaskPublisher(for: request)
-            .map(\.data)
-            .decode(type: [NYCRestaurantResponse].self, decoder: JSONDecoder())
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completion in
-                    if case .failure(let error) = completion {
-                        print("❌ API test failed: \(error)")
-                    } else {
-                        print("✅ API test successful")
-                    }
-                },
-                receiveValue: { restaurants in
-                    print("✅ API test received \(restaurants.count) restaurants")
-                    if let first = restaurants.first {
-                        print("📋 Sample restaurant: \(first.dba) - \(first.boro ?? "Unknown")")
-                    }
-                }
-            )
-            .store(in: &cancellables)
+    // UserDefaults keys
+    private let restaurantsKey = "savedRestaurants"
+    private let lastUpdateKey = "lastUpdateTime"
+    
+    init() {
+        loadRestaurantsFromStorage()
     }
     
-    func fetchRestaurants(modelContext: ModelContext, completion: ((Bool) -> Void)? = nil) {
-        print("🔄 Starting restaurant data fetch...")
+    // MARK: - Data Persistence
+    
+    private func loadRestaurantsFromStorage() {
+        if let data = UserDefaults.standard.data(forKey: restaurantsKey),
+           let restaurants = try? JSONDecoder().decode([Restaurant].self, from: data) {
+            allRestaurants = restaurants
+            print("📱 Loaded \(restaurants.count) restaurants from storage")
+        }
+        
+        if let lastUpdate = UserDefaults.standard.object(forKey: lastUpdateKey) as? Date {
+            lastUpdateTime = lastUpdate
+        }
+    }
+    
+    private func saveRestaurantsToStorage() {
+        if let data = try? JSONEncoder().encode(allRestaurants) {
+            UserDefaults.standard.set(data, forKey: restaurantsKey)
+            UserDefaults.standard.set(Date(), forKey: lastUpdateKey)
+            print("💾 Saved \(allRestaurants.count) restaurants to storage")
+        }
+    }
+    
+    // MARK: - Background Data Download
+    
+    func downloadAllRestaurants(completion: ((Bool) -> Void)? = nil) {
+        print("🔄 Starting background restaurant data download...")
         isLoading = true
         errorMessage = nil
-        progressMessage = "Starting data fetch..."
+        progressMessage = "Starting data download..."
         totalRestaurantsLoaded = 0
         retryCount = 0
         
         // Clear existing data first
-        clearExistingData(modelContext: modelContext)
+        allRestaurants.removeAll()
         
         // Fetch all restaurants with pagination
-        fetchAllRestaurants(modelContext: modelContext, offset: 0, completion: completion)
+        fetchAllRestaurants(offset: 0, completion: completion)
     }
     
-    // New method for location-based loading
-    func loadRestaurantsForRegion(center: CLLocationCoordinate2D, radius: Double, modelContext: ModelContext, completion: @escaping ([Restaurant]) -> Void) {
-        print("📍 Loading restaurants for region: center(\(center.latitude), \(center.longitude)), radius: \(radius) miles")
-        
-        // If we have all restaurants loaded, filter from local data
-        if !allRestaurants.isEmpty {
-            let filteredRestaurants = filterRestaurantsByLocation(restaurants: allRestaurants, center: center, radius: radius)
-            let limitedRestaurants = Array(filteredRestaurants.prefix(100))
-            currentViewRestaurants = limitedRestaurants
-            completion(limitedRestaurants)
-            return
-        }
-        
-        // Otherwise, fetch from API with location filter
-        fetchRestaurantsForRegion(center: center, radius: radius, modelContext: modelContext, completion: completion)
-    }
-    
-    private func fetchRestaurantsForRegion(center: CLLocationCoordinate2D, radius: Double, modelContext: ModelContext, completion: @escaping ([Restaurant]) -> Void) {
-        let limit = 100
-        let queryItems = [
-            URLQueryItem(name: "$limit", value: "\(limit)"),
-            URLQueryItem(name: "$order", value: "camis"),
-            URLQueryItem(name: "$select", value: "camis,dba,boro,building,street,zipcode,phone,cuisine_description,inspection_date,action,violation_code,violation_description,critical_flag,score,grade,grade_date,record_date,inspection_type,latitude,longitude"),
-            // Add location filter (approximate bounding box)
-            URLQueryItem(name: "$where", value: "latitude is not null and longitude is not null and latitude != '0' and longitude != '0'")
-        ]
-        
-        var urlComponents = URLComponents(string: baseURL)!
-        urlComponents.queryItems = queryItems
-        
-        guard let url = urlComponents.url else {
-            errorMessage = "Invalid URL"
-            completion([])
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30.0
-        
-        URLSession.shared.dataTaskPublisher(for: request)
-            .map(\.data)
-            .decode(type: [NYCRestaurantResponse].self, decoder: JSONDecoder())
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] result in
-                    if case .failure(let error) = result {
-                        print("❌ Location-based API request failed: \(error)")
-                        completion([])
-                    }
-                },
-                receiveValue: { [weak self] responses in
-                    guard let self = self else {
-                        completion([])
-                        return
-                    }
-                    print("✅ Received \(responses.count) restaurants for region")
-                    let mappedRestaurants = responses.compactMap { resp -> Restaurant? in
-                        guard let lat = Double(resp.latitude ?? ""),
-                              let lon = Double(resp.longitude ?? ""),
-                              lat != 0.0, lon != 0.0 else { return nil }
-                        return self.createRestaurant(from: resp, camis: resp.camis)
-                    }
-                    let filteredRestaurants = self.filterRestaurantsByLocation(restaurants: mappedRestaurants, center: center, radius: radius)
-                    let limitedRestaurants = Array(filteredRestaurants.prefix(100))
-                    self.currentViewRestaurants = limitedRestaurants
-                    completion(limitedRestaurants)
-                }
-            )
-            .store(in: &cancellables)
-    }
-    
-    private func filterRestaurantsByLocation(restaurants: [Restaurant], center: CLLocationCoordinate2D, radius: Double) -> [Restaurant] {
-        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        
-        return restaurants.filter { restaurant in
-            let restaurantLocation = CLLocation(latitude: restaurant.latitude, longitude: restaurant.longitude)
-            let distance = centerLocation.distance(from: restaurantLocation) / 1609.34 // Convert meters to miles
-            return distance <= radius
-        }
-    }
-    
-    // Method to load restaurants around user's current location
-    func loadRestaurantsAroundUserLocation(userLocation: CLLocationCoordinate2D, modelContext: ModelContext, completion: @escaping ([Restaurant]) -> Void) {
-        let radius: Double = 0.5 // 0.5 miles
-        loadRestaurantsForRegion(center: userLocation, radius: radius, modelContext: modelContext, completion: completion)
-    }
-    
-    private func clearExistingData(modelContext: ModelContext) {
-        do {
-            try modelContext.delete(model: Restaurant.self)
-            try modelContext.save()
-        } catch {
-            print("Error clearing existing data: \(error)")
-        }
-    }
-    
-    private func fetchAllRestaurants(modelContext: ModelContext, offset: Int, completion: ((Bool) -> Void)? = nil) {
+    private func fetchAllRestaurants(offset: Int, completion: ((Bool) -> Void)? = nil) {
         let limit = 1000
         let queryItems = [
             URLQueryItem(name: "$limit", value: "\(limit)"),
@@ -193,13 +92,12 @@ class RestaurantDataService: ObservableObject {
         }
         
         print("🌐 Fetching from URL: \(url)")
-        progressMessage = "Fetching restaurants \(offset + 1) to \(offset + limit)..."
+        progressMessage = "Downloading restaurants \(offset + 1) to \(offset + limit)..."
         
         var request = URLRequest(url: url)
-        request.timeoutInterval = 60.0 // 60 second timeout for large datasets
+        request.timeoutInterval = 60.0
         request.cachePolicy = .reloadIgnoringLocalCacheData
         
-        print("📡 Making network request...")
         URLSession.shared.dataTaskPublisher(for: request)
             .map(\.data)
             .decode(type: [NYCRestaurantResponse].self, decoder: JSONDecoder())
@@ -233,7 +131,7 @@ class RestaurantDataService: ObservableObject {
                             self?.retryCount += 1
                             print("🔄 Retrying request (attempt \(self?.retryCount ?? 0)/\(self?.maxRetries ?? 3))...")
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                self?.fetchAllRestaurants(modelContext: modelContext, offset: offset, completion: completion)
+                                self?.fetchAllRestaurants(offset: offset, completion: completion)
                             }
                         } else {
                             print("❌ Max retries reached")
@@ -243,13 +141,13 @@ class RestaurantDataService: ObservableObject {
                 },
                 receiveValue: { [weak self] restaurants in
                     print("✅ Received \(restaurants.count) restaurants from API")
-                    self?.processRestaurants(restaurants, modelContext: modelContext, offset: offset, limit: limit, completion: completion)
+                    self?.processRestaurants(restaurants, offset: offset, limit: limit, completion: completion)
                 }
             )
             .store(in: &cancellables)
     }
     
-    private func processRestaurants(_ restaurants: [NYCRestaurantResponse], modelContext: ModelContext, offset: Int, limit: Int, completion: ((Bool) -> Void)?) {
+    private func processRestaurants(_ restaurants: [NYCRestaurantResponse], offset: Int, limit: Int, completion: ((Bool) -> Void)?) {
         print("🔄 Processing \(restaurants.count) restaurants from offset \(offset)...")
         
         // Group restaurants by CAMIS (unique restaurant identifier)
@@ -276,58 +174,43 @@ class RestaurantDataService: ObservableObject {
                let lon = Double(mostRecentInspection.longitude ?? ""),
                lat != 0.0 && lon != 0.0 {
                 validCoordinatesCount += 1
-                print("📍 Valid coordinates: \(lat), \(lon) for restaurant: \(mostRecentInspection.dba)")
                 let restaurant = createRestaurant(from: mostRecentInspection, camis: camis)
-                modelContext.insert(restaurant)
+                allRestaurants.append(restaurant)
                 newRestaurantsCount += 1
             } else {
                 invalidCoordinatesCount += 1
-                print("❌ Invalid coordinates for restaurant: \(mostRecentInspection.dba) - lat: \(mostRecentInspection.latitude ?? "nil"), lon: \(mostRecentInspection.longitude ?? "nil")")
             }
         }
         
-        print("📈 Processed batch: \(newRestaurantsCount) new restaurants created, \(validCoordinatesCount) valid coordinates, \(invalidCoordinatesCount) invalid coordinates")
+        print("📈 Processed batch: \(newRestaurantsCount) new restaurants created")
         
         totalRestaurantsLoaded += newRestaurantsCount
-        progressMessage = "Loaded \(totalRestaurantsLoaded) restaurants..."
+        progressMessage = "Downloaded \(totalRestaurantsLoaded) restaurants..."
         
         // Save current batch
-        do {
-            try modelContext.save()
-            print("💾 Successfully saved \(newRestaurantsCount) restaurants to database")
-        } catch {
-            print("❌ Error saving restaurants: \(error)")
-            errorMessage = "Error saving data: \(error.localizedDescription)"
-            isLoading = false
-            return
-        }
+        saveRestaurantsToStorage()
+        print("💾 Successfully saved \(newRestaurantsCount) restaurants to storage")
         
         // Continue with next batch if we got a full page
         if restaurants.count == limit {
             print("🔄 Continuing with next batch from offset \(offset + limit)")
-            fetchAllRestaurants(modelContext: modelContext, offset: offset + limit, completion: completion)
+            fetchAllRestaurants(offset: offset + limit, completion: completion)
         } else {
-            print("🎉 Finished loading all restaurants! Total: \(totalRestaurantsLoaded)")
+            print("🎉 Finished downloading all restaurants! Total: \(totalRestaurantsLoaded)")
             isLoading = false
             lastUpdateTime = Date()
-            progressMessage = "Successfully loaded \(totalRestaurantsLoaded) restaurants"
-            
-            // Load all restaurants from database for local filtering
-            loadAllRestaurantsFromDatabase(modelContext: modelContext)
-            
+            progressMessage = "Successfully downloaded \(totalRestaurantsLoaded) restaurants"
             completion?(true)
         }
     }
     
     private func createRestaurant(from inspection: NYCRestaurantResponse, camis: String) -> Restaurant {
-        print("🏪 Creating restaurant: \(inspection.dba)")
-        
         let address = [inspection.building, inspection.street]
             .compactMap { $0 }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
         
-        let restaurant = Restaurant(
+        return Restaurant(
             id: camis,
             name: inspection.dba,
             grade: inspection.grade ?? "N/A",
@@ -340,17 +223,13 @@ class RestaurantDataService: ObservableObject {
             phone: inspection.phone,
             cuisine: inspection.cuisineDescription,
             inspectionDate: parseDate(inspection.inspectionDate),
-            score: Int(inspection.score ?? "0")
+            score: Int(inspection.score ?? "0") ?? 0
         )
-        
-        print("✅ Created restaurant: \(restaurant.name) with grade: \(restaurant.grade)")
-        return restaurant
     }
     
     private func parseDate(_ dateString: String?) -> Date? {
         guard let dateString = dateString else { return nil }
         
-        // Handle different date formats from NYC API
         let formatters = [
             "yyyy-MM-dd'T'HH:mm:ss.SSS",
             "yyyy-MM-dd'T'HH:mm:ss",
@@ -361,24 +240,86 @@ class RestaurantDataService: ObservableObject {
             let formatter = DateFormatter()
             formatter.dateFormat = format
             if let date = formatter.date(from: dateString) {
-                print("📅 Successfully parsed date: \(dateString) -> \(date)")
                 return date
             }
         }
         
-        print("❌ Failed to parse date: \(dateString)")
         return nil
     }
     
-    private func loadAllRestaurantsFromDatabase(modelContext: ModelContext) {
-        print("📥 Loading all restaurants from database for local filtering...")
-        let fetchDescriptor = FetchDescriptor<Restaurant>()
-        do {
-            allRestaurants = try modelContext.fetch(fetchDescriptor)
-            print("✅ Loaded \(allRestaurants.count) restaurants from database")
-        } catch {
-            print("❌ Error fetching restaurants from database: \(error)")
+    // MARK: - Search Methods
+    
+    func fetchRestaurants(borough: String, searchText: String = "", offset: Int = 0, limit: Int = 50) -> [Restaurant] {
+        var filteredRestaurants = allRestaurants.filter { $0.borough == borough }
+        
+        // Apply search filter
+        if !searchText.isEmpty {
+            let searchLower = searchText.lowercased()
+            filteredRestaurants = filteredRestaurants.filter { restaurant in
+                restaurant.name.lowercased().contains(searchLower) ||
+                restaurant.address.lowercased().contains(searchLower) ||
+                (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
+            }
         }
+        
+        // Sort by name
+        filteredRestaurants.sort { $0.name < $1.name }
+        
+        // Apply pagination
+        let startIndex = offset
+        let endIndex = min(startIndex + limit, filteredRestaurants.count)
+        
+        if startIndex < filteredRestaurants.count {
+            let result = Array(filteredRestaurants[startIndex..<endIndex])
+            print("📋 Fetched \(result.count) restaurants for borough: \(borough), offset: \(offset)")
+            return result
+        }
+        
+        return []
+    }
+    
+    func getRestaurantCount(borough: String, searchText: String = "") -> Int {
+        var filteredRestaurants = allRestaurants.filter { $0.borough == borough }
+        
+        if !searchText.isEmpty {
+            let searchLower = searchText.lowercased()
+            filteredRestaurants = filteredRestaurants.filter { restaurant in
+                restaurant.name.lowercased().contains(searchLower) ||
+                restaurant.address.lowercased().contains(searchLower) ||
+                (restaurant.cuisine?.lowercased().contains(searchLower) ?? false)
+            }
+        }
+        
+        return filteredRestaurants.count
+    }
+    
+    func getAvailableBoroughs() -> [String] {
+        let boroughs = Set(allRestaurants.map { $0.borough })
+        return Array(boroughs).sorted()
+    }
+    
+    // MARK: - Location-based Methods
+    
+    func fetchRestaurantsNearLocation(center: CLLocationCoordinate2D, radius: Double, limit: Int = 100) -> [Restaurant] {
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        
+        let nearbyRestaurants = allRestaurants.filter { restaurant in
+            let restaurantLocation = CLLocation(latitude: restaurant.latitude, longitude: restaurant.longitude)
+            let distance = centerLocation.distance(from: restaurantLocation) / 1609.34 // Convert to miles
+            return distance <= radius
+        }
+        
+        return Array(nearbyRestaurants.prefix(limit))
+    }
+    
+    // MARK: - Data Management
+    
+    func clearAllData() {
+        allRestaurants.removeAll()
+        UserDefaults.standard.removeObject(forKey: restaurantsKey)
+        UserDefaults.standard.removeObject(forKey: lastUpdateKey)
+        lastUpdateTime = nil
+        print("🗑️ Cleared all restaurant data")
     }
 }
 

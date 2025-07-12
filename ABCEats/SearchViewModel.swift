@@ -6,76 +6,123 @@
 //
 
 import Foundation
-import SwiftData
 import Combine
 
-@MainActor
 class SearchViewModel: ObservableObject {
     @Published var searchText = ""
-    @Published var selectedGrade = "All"
-    @Published var selectedBorough = "All"
-    @Published var selectedFoodType = "All"
-    @Published var selectedZipCode = ""
-    @Published var isSearching = false
+    @Published var selectedBorough: String?
+    @Published var filteredRestaurants: [Restaurant] = []
+    @Published var isLoadingMore = false
+    @Published var hasMoreData = true
     
-    private var restaurants: [Restaurant] = []
+    private let dataService = RestaurantDataService()
+    private var currentOffset = 0
+    private let pageSize = 50
     private var cancellables = Set<AnyCancellable>()
     
-    var filteredRestaurants: [Restaurant] {
-        var filtered = restaurants
+    init() {
+        setupBindings()
+    }
+    
+    private func setupBindings() {
+        // Debounce search text changes
+        $searchText
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.resetAndLoad()
+            }
+            .store(in: &cancellables)
         
-        // Filter by search text (name and address)
-        if !searchText.isEmpty {
-            filtered = filtered.filter { restaurant in
-                restaurant.name.localizedCaseInsensitiveContains(searchText) ||
-                restaurant.address.localizedCaseInsensitiveContains(searchText)
+        // Reset when borough changes
+        $selectedBorough
+            .sink { [weak self] _ in
+                self?.resetAndLoad()
+            }
+            .store(in: &cancellables)
+    }
+    
+    func getAvailableBoroughs() -> [String] {
+        return dataService.getAvailableBoroughs()
+    }
+    
+    func resetAndLoad() {
+        currentOffset = 0
+        filteredRestaurants = []
+        hasMoreData = true
+        loadMoreRestaurants()
+    }
+    
+    func loadMoreRestaurants() {
+        guard let borough = selectedBorough, hasMoreData, !isLoadingMore else { return }
+        
+        isLoadingMore = true
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let restaurants = self.dataService.fetchRestaurants(
+                borough: borough,
+                searchText: self.searchText,
+                offset: self.currentOffset,
+                limit: self.pageSize
+            )
+            
+            DispatchQueue.main.async {
+                self.isLoadingMore = false
+                
+                if restaurants.count < self.pageSize {
+                    self.hasMoreData = false
+                }
+                
+                if self.currentOffset == 0 {
+                    // First page - replace all
+                    self.filteredRestaurants = restaurants
+                } else {
+                    // Subsequent pages - append
+                    self.filteredRestaurants.append(contentsOf: restaurants)
+                }
+                
+                self.currentOffset += restaurants.count
             }
         }
-        
-        // Filter by grade
-        if selectedGrade != "All" {
-            filtered = filtered.filter { $0.grade == selectedGrade }
-        }
-        
-        // Filter by borough
-        if selectedBorough != "All" {
-            filtered = filtered.filter { $0.borough == selectedBorough }
-        }
-        
-        // Filter by food type
-        if selectedFoodType != "All" {
-            filtered = filtered.filter { $0.foodType == selectedFoodType }
-        }
-        
-        // Filter by zip code
-        if !selectedZipCode.isEmpty {
-            filtered = filtered.filter { $0.zipCode == selectedZipCode }
-        }
-        
-        return filtered
-    }
-    
-    var availableGrades: [String] {
-        ["All"] + Array(Set(restaurants.map { $0.grade })).sorted()
-    }
-    
-    var availableBoroughs: [String] {
-        ["All"] + Array(Set(restaurants.map { $0.borough })).sorted()
-    }
-    
-    var availableFoodTypes: [String] {
-        ["All"] + Array(Set(restaurants.map { $0.foodType })).sorted()
-    }
-    
-    func updateRestaurants(_ restaurants: [Restaurant]) {
-        self.restaurants = restaurants
     }
     
     func clearFilters() {
         searchText = ""
-        selectedGrade = "All"
-        selectedBorough = "All"
-        selectedFoodType = "All"
-        selectedZipCode = ""
+        selectedBorough = nil
+        resetAndLoad()
+    }
+    
+    func getRestaurantCount() -> Int {
+        guard let borough = selectedBorough else { return 0 }
+        return dataService.getRestaurantCount(borough: borough, searchText: searchText)
+    }
+    
+    // MARK: - Filter Properties
+    
+    @Published var selectedGrade: String?
+    @Published var selectedCuisine: String?
+    @Published var minScore: Int?
+    @Published var maxScore: Int?
+    
+    var availableGrades: [String] {
+        return ["A", "B", "C", "N/A"]
+    }
+    
+    var availableCuisines: [String] {
+        let cuisines = Set(filteredRestaurants.compactMap { $0.cuisine })
+        return Array(cuisines).sorted()
+    }
+    
+    func applyFilters() {
+        resetAndLoad()
+    }
+    
+    func clearAllFilters() {
+        selectedGrade = nil
+        selectedCuisine = nil
+        minScore = nil
+        maxScore = nil
+        clearFilters()
     }
 } 

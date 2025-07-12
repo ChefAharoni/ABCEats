@@ -10,7 +10,6 @@ import MapKit
 import CoreLocation
 
 struct RestaurantMapView: View {
-    @Environment(\.modelContext) private var modelContext
     @ObservedObject var locationManager: LocationManager
     @ObservedObject var dataService: RestaurantDataService
     
@@ -21,11 +20,11 @@ struct RestaurantMapView: View {
     @State private var selectedRestaurant: Restaurant?
     @State private var showingDetail = false
     @State private var isLoadingRestaurants = false
-    @State private var userLocationCircle: MKCircle?
+    @State private var currentRestaurants: [Restaurant] = []
     
     var body: some View {
         ZStack {
-            Map(coordinateRegion: $region, showsUserLocation: true, annotationItems: dataService.currentViewRestaurants) { restaurant in
+            Map(coordinateRegion: $region, showsUserLocation: true, annotationItems: currentRestaurants) { restaurant in
                 MapAnnotation(coordinate: restaurant.coordinate) {
                     RestaurantAnnotationView(restaurant: restaurant) {
                         selectedRestaurant = restaurant
@@ -112,13 +111,16 @@ struct RestaurantMapView: View {
         // Calculate radius based on current map span
         let radius = calculateRadiusFromRegion(region)
         
-        dataService.loadRestaurantsForRegion(
-            center: region.center,
-            radius: radius,
-            modelContext: modelContext
-        ) { restaurants in
+        DispatchQueue.global(qos: .userInitiated).async {
+            let restaurants = dataService.fetchRestaurantsNearLocation(
+                center: region.center,
+                radius: radius,
+                limit: 100
+            )
+            
             DispatchQueue.main.async {
-                isLoadingRestaurants = false
+                self.currentRestaurants = restaurants
+                self.isLoadingRestaurants = false
                 print("📍 Loaded \(restaurants.count) restaurants for current region")
             }
         }
@@ -150,11 +152,17 @@ struct RestaurantMapView: View {
             }
             
             // Load restaurants in 0.5-mile radius around user location
-            dataService.loadRestaurantsAroundUserLocation(
-                userLocation: location.coordinate,
-                modelContext: modelContext
-            ) { restaurants in
-                print("📍 Loaded \(restaurants.count) restaurants within 0.5 miles of user location")
+            DispatchQueue.global(qos: .userInitiated).async {
+                let restaurants = dataService.fetchRestaurantsNearLocation(
+                    center: location.coordinate,
+                    radius: 0.5,
+                    limit: 100
+                )
+                
+                DispatchQueue.main.async {
+                    self.currentRestaurants = restaurants
+                    print("📍 Loaded \(restaurants.count) restaurants within 0.5 miles of user location")
+                }
             }
         } else {
             locationManager.getCurrentLocation()

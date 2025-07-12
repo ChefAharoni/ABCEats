@@ -6,40 +6,58 @@
 //
 
 import SwiftUI
-import SwiftData
 import BackgroundTasks
 
 @main
 struct ABCEatsApp: App {
-    var sharedModelContainer: ModelContainer = {
-        print("🏗️ Creating ModelContainer...")
-        let schema = Schema([
-            Restaurant.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            print("✅ ModelContainer created successfully")
-            return container
-        } catch {
-            print("❌ Failed to create ModelContainer: \(error)")
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
-    init() {
-        // Register background tasks ONCE at app launch
-        BackgroundRefreshService().registerBackgroundTasks()
-        print("🚀 ABCEatsApp initializing...")
-        // ... any other setup ...
-        print("✅ ABCEatsApp initialization complete")
-    }
-
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
+    }
+}
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        
+        // Register background task
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.abceats.refresh", using: nil) { task in
+            self.handleBackgroundRefresh(task: task as! BGAppRefreshTask)
+        }
+        
+        return true
+    }
+    
+    private func handleBackgroundRefresh(task: BGAppRefreshTask) {
+        print("🔄 Background refresh task started")
+        
+        // Schedule the next background refresh
+        scheduleBackgroundRefresh()
+        
+        // Create a task to ensure the app gets background time
+        task.expirationHandler = {
+            print("⚠️ Background refresh task expired")
+        }
+        
+        // Perform the background refresh
+        let dataService = RestaurantDataService()
+        dataService.downloadAllRestaurants { success in
+            print("🔄 Background refresh completed: \(success ? "success" : "failed")")
+            task.setTaskCompleted(success: success)
+        }
+    }
+    
+    private func scheduleBackgroundRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.abceats.refresh")
+        request.earliestBeginDate = Calendar.current.date(byAdding: .hour, value: 4, to: Date()) // 4 hours from now
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("✅ Background refresh scheduled for 4 hours from now")
+        } catch {
+            print("❌ Failed to schedule background refresh: \(error)")
+        }
     }
 }

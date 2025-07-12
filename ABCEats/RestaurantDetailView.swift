@@ -117,9 +117,7 @@ struct RestaurantDetailView: View {
                 detailRow(title: "Zip Code", value: restaurant.zipCode)
                 detailRow(title: "Food Type", value: restaurant.foodType)
                 
-                if let score = restaurant.score {
-                    detailRow(title: "Health Score", value: "\(score)")
-                }
+                detailRow(title: "Health Score", value: "\(restaurant.score)")
                 
                 if let inspectionDate = restaurant.inspectionDate {
                     detailRow(title: "Inspection Date", value: formatDate(inspectionDate))

@@ -9,17 +9,14 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var restaurants: [Restaurant]
-    
     @StateObject private var dataService = RestaurantDataService()
     @StateObject private var searchViewModel = SearchViewModel()
     @StateObject private var locationManager = LocationManager()
-    @StateObject private var backgroundRefreshService = BackgroundRefreshService()
     
     @State private var selectedTab = 0
     @State private var showingFilters = false
     @State private var showingRefreshAlert = false
+    @State private var showingBoroughPicker = false
     
     var body: some View {
         let _ = print("🎯 ContentView body is being rendered!")
@@ -59,9 +56,6 @@ struct ContentView: View {
             print("🎯 ContentView appeared!")
             setupApp()
         }
-        .onChange(of: restaurants) { _ in
-            searchViewModel.updateRestaurants(restaurants)
-        }
         .alert("Refresh Data", isPresented: $showingRefreshAlert) {
             Button("Refresh Now") {
                 refreshData()
@@ -83,13 +77,20 @@ struct ContentView: View {
     
     private var searchView: some View {
         VStack {
-            // Search bar
-            searchBar
+            // Borough selector
+            boroughSelector
+            
+            // Search bar (only show if borough is selected)
+            if searchViewModel.selectedBorough != nil {
+                searchBar
+            }
             
             // Results
             if dataService.isLoading {
                 loadingView
-            } else if searchViewModel.filteredRestaurants.isEmpty {
+            } else if searchViewModel.selectedBorough == nil {
+                boroughSelectionView
+            } else if searchViewModel.filteredRestaurants.isEmpty && !searchViewModel.isLoadingMore {
                 emptyStateView
             } else {
                 restaurantListView
@@ -99,14 +100,77 @@ struct ContentView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Filters") {
-                    showingFilters = true
+                if searchViewModel.selectedBorough != nil {
+                    Button("Filters") {
+                        showingFilters = true
+                    }
                 }
             }
         }
         .sheet(isPresented: $showingFilters) {
             SearchFiltersView(searchViewModel: searchViewModel)
         }
+    }
+    
+    private var boroughSelector: some View {
+        HStack {
+            Text("Borough:")
+                .fontWeight(.medium)
+            
+            Button(action: {
+                showingBoroughPicker = true
+            }) {
+                HStack {
+                    Text(searchViewModel.selectedBorough ?? "Select Borough")
+                        .foregroundColor(searchViewModel.selectedBorough == nil ? .secondary : .primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.down")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+        .padding(.horizontal)
+        .actionSheet(isPresented: $showingBoroughPicker) {
+            ActionSheet(
+                title: Text("Select Borough"),
+                buttons: searchViewModel.getAvailableBoroughs().map { borough in
+                    .default(Text(borough)) {
+                        searchViewModel.selectedBorough = borough
+                    }
+                } + [.cancel()]
+            )
+        }
+    }
+    
+    private var boroughSelectionView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "building.2")
+                .font(.system(size: 60))
+                .foregroundColor(.secondary)
+            
+            Text("Select a Borough")
+                .font(.title2)
+                .fontWeight(.medium)
+            
+            Text("Choose a borough to browse restaurants")
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Button("Select Borough") {
+                showingBoroughPicker = true
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
     
     private var searchBar: some View {
@@ -182,12 +246,40 @@ struct ContentView: View {
     }
     
     private var restaurantListView: some View {
-        List(searchViewModel.filteredRestaurants) { restaurant in
-            NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
-                RestaurantListItemView(restaurant: restaurant)
+        List {
+            ForEach(searchViewModel.filteredRestaurants, id: \.id) { restaurant in
+                NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
+                    RestaurantListItemView(restaurant: restaurant)
+                }
+            }
+            
+            // Loading more indicator
+            if searchViewModel.isLoadingMore {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Spacer()
+                }
+                .padding()
+            }
+            
+            // Load more button
+            if searchViewModel.hasMoreData && !searchViewModel.isLoadingMore {
+                Button("Load More") {
+                    searchViewModel.loadMoreRestaurants()
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
             }
         }
         .listStyle(PlainListStyle())
+        .onAppear {
+            // Load initial data if needed
+            if searchViewModel.filteredRestaurants.isEmpty && searchViewModel.selectedBorough != nil {
+                searchViewModel.loadMoreRestaurants()
+            }
+        }
     }
     
     private var settingsView: some View {
@@ -205,42 +297,17 @@ struct ContentView: View {
                     }
                 }
                 
+                HStack {
+                    Text("Total Restaurants")
+                    Spacer()
+                    Text("\(dataService.totalRestaurantsLoaded)")
+                        .foregroundColor(.secondary)
+                }
+                
                 Button("Refresh Data") {
                     showingRefreshAlert = true
                 }
                 .foregroundColor(.blue)
-                
-                Button("Test API Connection") {
-                    dataService.testAPI()
-                }
-                .foregroundColor(.green)
-                
-                if dataService.isLoading {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Loading...")
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            Section("Location") {
-                HStack {
-                    Text("Location Access")
-                    Spacer()
-                    Text(locationStatusText)
-                        .foregroundColor(.secondary)
-                }
-                
-                if locationManager.authorizationStatus == .denied {
-                    Button("Open Settings") {
-                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(settingsUrl)
-                        }
-                    }
-                    .foregroundColor(.blue)
-                }
             }
             
             Section("About") {
@@ -251,62 +318,38 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                Link("NYC Health Data Source", destination: URL(string: "https://data.cityofnewyork.us/Health/DOHMH-New-York-City-Restaurant-Inspection-Results/43nn-pn8j")!)
+                HStack {
+                    Text("Data Source")
+                    Spacer()
+                    Text("NYC Health")
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.large)
-    }
-    
-    private var locationStatusText: String {
-        switch locationManager.authorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways:
-            return "Enabled"
-        case .denied, .restricted:
-            return "Disabled"
-        case .notDetermined:
-            return "Not Determined"
-        @unknown default:
-            return "Unknown"
-        }
     }
     
     private func setupApp() {
-        print("🚀 Setting up app...")
+        print("🎯 Setting up app...")
         
-        // Register background tasks
-        backgroundRefreshService.scheduleBackgroundRefresh()
-        
-        // Test API connection
-        print("🧪 Testing API connection...")
-        dataService.testAPI()
-        
-        // Load initial data if needed
-        print("📊 Checking restaurants count: \(restaurants.count)")
-        if restaurants.isEmpty {
-            print("📱 No restaurants found, starting data fetch...")
-            refreshData()
-        } else {
-            print("📱 Found \(restaurants.count) existing restaurants")
-            // Check if data is stale (older than 24 hours)
-            if let lastUpdate = dataService.lastUpdateTime {
-                let hoursSinceUpdate = Calendar.current.dateComponents([.hour], from: lastUpdate, to: Date()).hour ?? 0
-                if hoursSinceUpdate >= 24 {
-                    print("🔄 Data is stale (\(hoursSinceUpdate) hours old), refreshing...")
-                    refreshData()
+        // Check if we need to download data
+        let boroughs = searchViewModel.getAvailableBoroughs()
+        if boroughs.isEmpty {
+            print("📥 No data found, starting download...")
+            dataService.downloadAllRestaurants { success in
+                if success {
+                    print("✅ Data download completed successfully")
                 } else {
-                    print("✅ Data is fresh (\(hoursSinceUpdate) hours old)")
+                    print("❌ Data download failed")
                 }
-            } else {
-                print("🔄 No last update time found, refreshing data...")
-                refreshData()
             }
+        } else {
+            print("✅ Found \(boroughs.count) boroughs with data")
         }
     }
     
     private func refreshData() {
-        print("🔄 Starting data refresh...")
-        dataService.fetchRestaurants(modelContext: modelContext) { success in
+        dataService.downloadAllRestaurants { success in
             if success {
                 print("✅ Data refresh completed successfully")
             } else {
@@ -325,5 +368,4 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Restaurant.self, inMemory: true)
 }
