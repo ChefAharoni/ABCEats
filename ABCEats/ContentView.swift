@@ -180,6 +180,10 @@ struct ContentView: View {
             
             TextField("Search restaurants...", text: $searchViewModel.searchText)
                 .textFieldStyle(PlainTextFieldStyle())
+                .autocorrectionDisabled(true)
+                .onChange(of: searchViewModel.searchText) { _, newValue in
+                    print("🔍 Search text changed to: '\(newValue)'")
+                }
             
             if !searchViewModel.searchText.isEmpty {
                 Button("Clear") {
@@ -331,17 +335,27 @@ struct ContentView: View {
         
         // Check if we need to download data
         let boroughs = searchViewModel.getAvailableBoroughs()
+        print("🎯 Available boroughs: \(boroughs)")
+        
         if boroughs.isEmpty {
             print("📥 No data found, starting download...")
             dataService.downloadAllRestaurants { success in
                 if success {
                     print("✅ Data download completed successfully")
+                    // Refresh boroughs after download
+                    let updatedBoroughs = self.searchViewModel.getAvailableBoroughs()
+                    print("✅ Updated boroughs after download: \(updatedBoroughs)")
                 } else {
                     print("❌ Data download failed")
                 }
             }
         } else {
             print("✅ Found \(boroughs.count) boroughs with data")
+            // Set a default borough if none is selected
+            if searchViewModel.selectedBorough == nil && !boroughs.isEmpty {
+                searchViewModel.selectedBorough = boroughs.first
+                print("✅ Set default borough: \(boroughs.first ?? "none")")
+            }
         }
     }
     

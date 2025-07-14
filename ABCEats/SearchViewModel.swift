@@ -32,10 +32,11 @@ class SearchViewModel: ObservableObject {
     }
     
     private func setupBindings() {
-        // Debounce search text changes with longer delay for better performance
+        // Search with minimal throttle for responsiveness while preventing excessive searches
         $searchText
-            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] newText in
+                // Search immediately for any text change
                 self?.performSearch()
             }
             .store(in: &cancellables)
@@ -88,6 +89,8 @@ class SearchViewModel: ObservableObject {
         
         // Check if data service has data
         let availableBoroughs = dataService.getAvailableBoroughs()
+        print("🏛️ Available boroughs: \(availableBoroughs)")
+        
         if availableBoroughs.isEmpty {
             print("⚠️ No boroughs available in data service")
             return
@@ -121,6 +124,7 @@ class SearchViewModel: ObservableObject {
         }
         
         print("📋 Loading restaurants for borough: \(borough), offset: \(currentOffset)")
+        print("📋 Search text: '\(searchText)', searchResults count: \(searchResults.count)")
         isLoadingMore = true
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -186,9 +190,13 @@ class SearchViewModel: ObservableObject {
     }
     
     private func performSearch() {
-        guard let borough = selectedBorough else { return }
+        guard let borough = selectedBorough else { 
+            print("❌ No borough selected for search")
+            return 
+        }
         
         print("🔍 Performing search for borough: \(borough), text: '\(searchText)'")
+        print("🔍 Current state - allRestaurantsInBorough: \(allRestaurantsInBorough.count), lastBorough: \(lastBorough)")
         
         // Cancel previous search task
         searchTask?.cancel()
@@ -199,6 +207,9 @@ class SearchViewModel: ObservableObject {
             resetAndLoadForBorough(borough)
             return
         }
+        
+        // Update last search text
+        lastSearchText = searchText
         
         // If borough changed, we need to reload all restaurants for that borough
         if borough != lastBorough {
@@ -235,7 +246,16 @@ class SearchViewModel: ObservableObject {
             await MainActor.run {
                 self.allRestaurantsInBorough = allRestaurants
                 self.lastBorough = borough
-                self.performLocalSearch()
+                
+                // If there's search text, perform search immediately
+                if !self.searchText.isEmpty {
+                    self.performLocalSearch()
+                } else {
+                    // Otherwise, show first page of all restaurants
+                    self.currentOffset = 0
+                    self.searchResults = allRestaurants
+                    self.loadMoreRestaurants()
+                }
             }
         }
     }
@@ -253,7 +273,7 @@ class SearchViewModel: ObservableObject {
         let searchLower = searchText.lowercased()
         print("🔍 Performing local search for: '\(searchText)'")
         
-        // Perform local filtering
+        // Perform local filtering with improved performance
         let filtered = allRestaurantsInBorough.filter { restaurant in
             restaurant.name.lowercased().contains(searchLower) ||
             restaurant.address.lowercased().contains(searchLower) ||
@@ -284,8 +304,12 @@ class SearchViewModel: ObservableObject {
         currentOffset = 0
         hasMoreData = sortedResults.count > pageSize
         
-        // Load first page
-        loadMoreRestaurants()
+        // Immediately update the UI with first page of results
+        let firstPage = Array(sortedResults.prefix(pageSize))
+        DispatchQueue.main.async {
+            self.filteredRestaurants = firstPage
+            print("✅ Updated UI with \(firstPage.count) search results")
+        }
     }
     
     func clearFilters() {
