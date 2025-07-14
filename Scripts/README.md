@@ -1,105 +1,103 @@
-# ABCEats Data Generation Scripts
+# ABCEats Scripts
 
-This directory contains scripts to pre-download restaurant data and bundle it with your app for immediate availability on first launch.
+This directory contains scripts for managing restaurant data and building the ABCEats app.
 
-## Quick Start
+## Scripts Overview
 
-1. **Generate the data:**
+### Data Generation
+
+- `generate_data.sh` - Downloads and processes restaurant data from NYC Health API
+- `generate_restaurant_data.swift` - Swift script that fetches and formats the data
+
+### Build Automation
+
+- `build_with_data.sh` - Generates fresh data and builds the app
+- `copy_data_to_bundle.sh` - Copies restaurant data to the app bundle during build
+- `setup_build_phase.sh` - Sets up automatic data copying in Xcode build phases
+
+## Automated Data Integration
+
+To ensure the latest restaurant data is automatically included in every build:
+
+### Option 1: Automatic Setup (Recommended)
+
+```bash
+# Run this once to set up automatic data copying
+./Scripts/setup_build_phase.sh
+```
+
+This will add a build phase to your Xcode project that automatically copies `restaurants_data.json` to the app bundle during every build.
+
+### Option 2: Manual Setup
+
+If the automatic setup doesn't work, you can manually add the build phase in Xcode:
+
+1. Open `ABCEats.xcodeproj` in Xcode
+2. Select the `ABCEats` target
+3. Go to the "Build Phases" tab
+4. Click the "+" button and select "New Run Script Phase"
+5. Name it "Copy Restaurant Data"
+6. Add this script:
+   ```bash
+   "${SRCROOT}/Scripts/copy_data_to_bundle.sh"
+   ```
+7. Make sure this phase runs before the "Copy Bundle Resources" phase
+
+### Option 3: Use the Automated Build Script
+
+```bash
+# This generates fresh data and builds the app
+./Scripts/build_with_data.sh
+```
+
+## Workflow
+
+### For Development
+
+1. **Generate fresh data:**
 
    ```bash
    ./Scripts/generate_data.sh
    ```
 
-2. **Add the generated file to Xcode:**
+2. **Build the app:**
+   - In Xcode: ⌘+B (Build)
+   - Or use: `./Scripts/build_with_data.sh`
 
-   - Open your Xcode project
-   - Right-click on the ABCEats folder in the navigator
-   - Select "Add Files to ABCEats"
-   - Choose `ABCEats/restaurants_data.json`
-   - Make sure "Add to target" is checked for your main app target
+### For Production
 
-3. **Build and run your app:**
-   - The data will now be available immediately on first launch!
-
-## What These Scripts Do
-
-### `generate_data.sh`
-
-A shell script that runs the Swift data generator and provides clear output.
-
-### `generate_restaurant_data.swift`
-
-A Swift script that:
-
-- Downloads all restaurant data from the NYC API
-- Processes and filters the data (removes duplicates, validates coordinates)
-- Saves the processed data as JSON
-- Creates two copies:
-  - `Scripts/restaurants_data.json` (for reference)
-  - `ABCEats/restaurants_data.json` (for bundling with the app)
-
-## How It Works
-
-1. **On App Launch:** The `RestaurantDataService` first tries to load data from UserDefaults (if the user has used the app before)
-
-2. **If No Local Data:** It automatically loads the pre-bundled `restaurants_data.json` file
-
-3. **Data Persistence:** Once loaded, the data is saved to UserDefaults for future launches
-
-4. **Background Updates:** The app can still download fresh data in the background for updates
-
-## Benefits
-
-- ✅ **Instant Launch:** No waiting for data download on first open
-- ✅ **Offline Capability:** App works immediately even without internet
-- ✅ **Better UX:** Users see content right away
-- ✅ **Reduced API Calls:** Less load on the NYC API
-- ✅ **Faster Development:** No need to wait for downloads during testing
-
-## Updating the Data
-
-To update the bundled data with fresh information:
-
-1. Run the generation script again:
+1. **Generate and build:**
 
    ```bash
-   ./Scripts/generate_data.sh
+   ./Scripts/build_with_data.sh
    ```
 
-2. The new data will replace the existing `restaurants_data.json` file
+2. **Archive and distribute:**
+   - Use Xcode's Archive feature
+   - The data will be automatically included
 
-3. Build and distribute your app with the updated data
+## Data File Location
 
-## File Structure
-
-```
-ABCEats/
-├── Scripts/
-│   ├── generate_data.sh              # Main script to run
-│   ├── generate_restaurant_data.swift # Swift data generator
-│   └── README.md                     # This file
-├── ABCEats/
-│   ├── restaurants_data.json         # Bundled data (generated)
-│   └── ... (other app files)
-└── ...
-```
+- **Generated data:** `Scripts/restaurants_data.json`
+- **App bundle:** `ABCEats/restaurants_data.json` (copied during build)
+- **Runtime access:** The app loads from the bundle on first launch
 
 ## Troubleshooting
 
-### Script fails to run
+### Build Phase Not Working
 
-- Make sure you're in the ABCEats project root directory
-- Ensure you have internet connection (needed to download from NYC API)
-- Check that Swift is installed: `swift --version`
+- Check that `copy_data_to_bundle.sh` is executable: `chmod +x Scripts/copy_data_to_bundle.sh`
+- Verify the script path in the build phase matches your project structure
+- Check Xcode build logs for any script errors
 
-### No data in app
+### Data Not Loading in App
 
-- Verify `restaurants_data.json` is added to your Xcode project target
-- Check the console for any error messages
-- Ensure the file is in the correct location: `ABCEats/restaurants_data.json`
+- Ensure `restaurants_data.json` exists in `Scripts/` directory
+- Check that the file is being copied to the app bundle (check build logs)
+- Verify the app can find the file at runtime (check console logs)
 
-### Large file size
+### Large File Size
 
-- The JSON file can be several MB due to the large number of restaurants
-- This is normal and expected for a comprehensive restaurant database
-- The file is compressed when the app is distributed through the App Store
+- The JSON file can be large (several MB)
+- Consider compressing or optimizing the data if needed
+- The app will load faster with smaller files

@@ -118,7 +118,6 @@ struct RestaurantDetailView: View {
             
             VStack(spacing: 8) {
                 detailRow(title: "Borough", value: restaurant.borough)
-                detailRow(title: "Zip Code", value: restaurant.zipCode)
                 detailRow(title: "Food Type", value: restaurant.foodType)
                 
                 detailRow(title: "Health Score", value: "\(restaurant.score)")
@@ -128,6 +127,34 @@ struct RestaurantDetailView: View {
                 }
                 
                 detailRow(title: "Last Updated", value: formatDate(restaurant.lastUpdated))
+            }
+            
+            if !restaurant.violations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Violations")
+                        .font(.headline)
+                    ForEach(restaurant.violations) { violation in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: violation.isCritical ? "exclamationmark.triangle.fill" : "info.circle")
+                                .foregroundColor(violation.isCritical ? .red : .gray)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(violation.description)
+                                    .font(.subheadline)
+                                if let flag = violation.criticalFlag {
+                                    Text(flag)
+                                        .font(.caption)
+                                        .foregroundColor(violation.isCritical ? .red : .secondary)
+                                }
+                                if let date = violation.inspectionDate {
+                                    Text(formatDate(date))
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 8)
             }
         }
     }

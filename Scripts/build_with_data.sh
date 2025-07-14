@@ -27,6 +27,8 @@ echo ""
 # Step 2: Build the app
 echo "🏗️  Step 2: Building the app..."
 echo "📱 This will build the app with the fresh data included"
+echo "💡 Note: Make sure you've set up the build phase for automatic data copying"
+echo "   Run: ./Scripts/setup_build_phase_simple.sh for instructions"
 
 # Check if xcodebuild is available
 if ! command -v xcodebuild &> /dev/null; then

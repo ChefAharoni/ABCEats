@@ -36,6 +36,13 @@ struct NYCRestaurantResponse: Codable {
     }
 }
 
+struct Violation: Codable {
+    let code: String?
+    let description: String
+    let criticalFlag: String?
+    let inspectionDate: Date?
+}
+
 struct Restaurant: Codable {
     let id: String
     let name: String
@@ -51,6 +58,7 @@ struct Restaurant: Codable {
     let cuisine: String?
     let inspectionDate: Date?
     let score: Int
+    let violations: [Violation]
     
     init(
         id: String,
@@ -65,7 +73,8 @@ struct Restaurant: Codable {
         phone: String? = nil,
         cuisine: String? = nil,
         inspectionDate: Date? = nil,
-        score: Int = 0
+        score: Int = 0,
+        violations: [Violation] = []
     ) {
         self.id = id
         self.name = name
@@ -81,6 +90,7 @@ struct Restaurant: Codable {
         self.cuisine = cuisine
         self.inspectionDate = inspectionDate
         self.score = score
+        self.violations = violations
     }
 }
 
@@ -167,10 +177,20 @@ class RestaurantDataGenerator {
         var invalidCoordinatesCount = 0
         
         for (camis, inspections) in groupedRestaurants {
-            // Get the most recent inspection for each restaurant
+            // Get all violations for this restaurant
+            let violations: [Violation] = inspections.compactMap { insp in
+                guard let desc = insp.violationDescription, !desc.isEmpty else { return nil }
+                return Violation(
+                    code: insp.violationCode,
+                    description: desc,
+                    criticalFlag: insp.criticalFlag,
+                    inspectionDate: parseDate(insp.inspectionDate)
+                )
+            }
+            // Get the most recent inspection for summary fields
             let mostRecentInspection = inspections
                 .filter { $0.inspectionDate != nil }
-                .sorted { 
+                .sorted {
                     guard let date1 = parseDate($0.inspectionDate),
                           let date2 = parseDate($1.inspectionDate) else { return false }
                     return date1 > date2
@@ -182,7 +202,7 @@ class RestaurantDataGenerator {
                let lon = Double(mostRecentInspection.longitude ?? ""),
                lat != 0.0 && lon != 0.0 {
                 validCoordinatesCount += 1
-                let restaurant = createRestaurant(from: mostRecentInspection, camis: camis)
+                let restaurant = createRestaurant(from: mostRecentInspection, camis: camis, violations: violations)
                 allRestaurants.append(restaurant)
                 newRestaurantsCount += 1
             } else {
@@ -203,7 +223,7 @@ class RestaurantDataGenerator {
         }
     }
     
-    private func createRestaurant(from inspection: NYCRestaurantResponse, camis: String) -> Restaurant {
+    private func createRestaurant(from inspection: NYCRestaurantResponse, camis: String, violations: [Violation]) -> Restaurant {
         let address = [inspection.building, inspection.street]
             .compactMap { $0 }
             .joined(separator: " ")
@@ -222,7 +242,8 @@ class RestaurantDataGenerator {
             phone: inspection.phone,
             cuisine: inspection.cuisineDescription,
             inspectionDate: parseDate(inspection.inspectionDate),
-            score: Int(inspection.score ?? "0") ?? 0
+            score: Int(inspection.score ?? "0") ?? 0,
+            violations: violations
         )
     }
     

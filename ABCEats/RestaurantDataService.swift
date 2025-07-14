@@ -223,7 +223,20 @@ class RestaurantDataService: ObservableObject {
                let lon = Double(mostRecentInspection.longitude ?? ""),
                lat != 0.0 && lon != 0.0 {
                 validCoordinatesCount += 1
-                let restaurant = createRestaurant(from: mostRecentInspection, camis: camis)
+                let violations: [Violation] = inspections.compactMap { inspection in
+                    guard let desc = inspection.violationDescription, !desc.isEmpty else { return nil }
+                    let code = inspection.violationCode
+                    let date = parseDate(inspection.inspectionDate)
+                    let id = [code ?? "", inspection.inspectionDate ?? "unknown"].joined(separator: "_")
+                    return Violation(
+                        id: id,
+                        code: code,
+                        description: desc,
+                        criticalFlag: inspection.criticalFlag,
+                        inspectionDate: date
+                    )
+                }
+                let restaurant = createRestaurant(from: mostRecentInspection, camis: camis, violations: violations)
                 allRestaurants.append(restaurant)
                 newRestaurantsCount += 1
             } else {
@@ -253,7 +266,7 @@ class RestaurantDataService: ObservableObject {
         }
     }
     
-    private func createRestaurant(from inspection: NYCRestaurantResponse, camis: String) -> Restaurant {
+    private func createRestaurant(from inspection: NYCRestaurantResponse, camis: String, violations: [Violation]) -> Restaurant {
         let address = [inspection.building, inspection.street]
             .compactMap { $0 }
             .joined(separator: " ")
@@ -273,7 +286,8 @@ class RestaurantDataService: ObservableObject {
             phone: inspection.phone,
             cuisine: inspection.cuisineDescription,
             inspectionDate: parseDate(inspection.inspectionDate),
-            score: Int(inspection.score ?? "0") ?? 0
+            score: Int(inspection.score ?? "0") ?? 0,
+            violations: violations
         )
     }
     

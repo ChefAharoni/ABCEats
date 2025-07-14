@@ -8,6 +8,18 @@
 import Foundation
 import CoreLocation
 
+struct Violation: Codable, Equatable, Identifiable {
+    let id: String // unique per violation (e.g., code + date)
+    let code: String?
+    let description: String
+    let criticalFlag: String? // "Critical" or "Not Critical"
+    let inspectionDate: Date?
+    
+    var isCritical: Bool {
+        (criticalFlag?.lowercased() == "critical")
+    }
+}
+
 struct Restaurant: Identifiable, Codable, Equatable {
     let id: String
     let name: String
@@ -23,6 +35,7 @@ struct Restaurant: Identifiable, Codable, Equatable {
     let cuisine: String?
     let inspectionDate: Date?
     let score: Int
+    let violations: [Violation]
     
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -59,7 +72,8 @@ struct Restaurant: Identifiable, Codable, Equatable {
         phone: String? = nil,
         cuisine: String? = nil,
         inspectionDate: Date? = nil,
-        score: Int = 0
+        score: Int = 0,
+        violations: [Violation] = []
     ) {
         self.id = id
         self.name = name
@@ -75,6 +89,7 @@ struct Restaurant: Identifiable, Codable, Equatable {
         self.cuisine = cuisine
         self.inspectionDate = inspectionDate
         self.score = score
+        self.violations = violations
     }
     
     // MARK: - Equatable
